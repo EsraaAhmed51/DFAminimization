@@ -1,4 +1,8 @@
-#include <bits/stdc++.h>
+// #include <bits/stdc++.h>
+#include <iostream>
+#include <vector>
+#include <map>
+#include <algorithm>
 using namespace std;
 
 class DFA {
@@ -9,6 +13,7 @@ private:
     vector<vector<int>> transitionTable;
     vector<int> FinalStates;
 public:
+    DFA() : numStates(0), startState(0) {}
     DFA(int n, vector<char> alphabet, int startState, vector<vector<int>> transitionTable, vector<int> FinalStates)
         : numStates(n), startState(startState), alphabet(alphabet), transitionTable(transitionTable), FinalStates(FinalStates) {}
 
@@ -33,6 +38,31 @@ public:
     vector<vector<int>> getTransitionTable() const {
         return transitionTable;
     }
+
+    void setNumStates(int n){
+        numStates = n;
+    }
+
+    void setStartState(int s){
+        startState = s;
+    }
+
+    void setAlphabet(const vector<char>& a){
+        alphabet = a;
+    }
+
+    void setTransition(int state, int symbolIndex, int nextState){
+        transitionTable[state][symbolIndex] = nextState;
+
+    }
+
+    void setTransitionTable(const vector<vector<int>>& t){
+        transitionTable = t;
+    }
+
+    void setFinalStatesList(const vector<int>& f) { FinalStates = f; }
+
+
 };
 
 class DFAvalidator {
@@ -76,110 +106,198 @@ public:
     }
 };
 
+DFA minimizeDFA(const DFA& d) {
+    const int S = d.getNumStates();
+    const int A = d.getAlphabet().size();
+
+    vector<int> group(S);
+    for (int s = 0; s < S; ++s)
+        group[s] = d.isFinal(s) ? 1 : 0;
+
+    // Compress IDs to 0..k-1
+    {
+        map<int,int> remap;
+        int k = 0;
+        for (int s = 0; s < S; ++s) {
+            auto it = remap.find(group[s]);
+            if (it == remap.end()) remap[group[s]] = k++;
+            group[s] = remap[group[s]];
+        }
+    }
+    int numGroups = *max_element(group.begin(), group.end()) + 1;
+
+    while (true) {
+        map<pair<int, vector<int>>, int> sigToId;
+        vector<int> newGroup(S);
+        int newNumGroups = 0;
+
+        for (int s = 0; s < S; ++s) {
+            vector<int> sig(A);
+            for (int a = 0; a < A; ++a)
+                sig[a] = group[d.getTransition(s, a)];
+            auto key = make_pair(group[s], sig);
+            auto it = sigToId.find(key);
+            if (it == sigToId.end()) {
+                sigToId[key] = newNumGroups;
+                newGroup[s] = newNumGroups++;
+            } else {
+                newGroup[s] = it->second;
+            }
+        }
+        if (newNumGroups == numGroups) {
+            group.swap(newGroup);
+            break;
+        }
+        group.swap(newGroup);
+        numGroups = newNumGroups;
+    }
+
+    DFA m;
+    m.setNumStates(numGroups);
+    m.setAlphabet(d.getAlphabet());                                  
+    m.setTransitionTable(vector<vector<int>>(numGroups, vector<int>(A, 0)));
+    m.setStartState(group[d.getStartState()]);
+
+    vector<bool> isFinBlock(numGroups, false);                       
+    for (int s = 0; s < S; ++s) {
+        int g = group[s];
+        if (d.isFinal(s)) isFinBlock[g] = true;
+        for (int a = 0; a < A; ++a)
+            m.setTransition(g, a, group[d.getTransition(s, a)]);
+    }
+    vector<int> finals;
+    for (int g = 0; g < numGroups; ++g)
+        if (isFinBlock[g]) finals.push_back(g);
+    m.setFinalStatesList(finals);
+
+    return m;
+}
+
+
+void printDFA(const DFA& dfa) {
+    cout << "Number of states: " << dfa.getNumStates() << '\n';
+    cout << "Start state: " << dfa.getStartState() << '\n';
+
+    cout << "Final states: ";
+    for (int s : dfa.getFinalStates())
+        cout << s << " ";
+    cout << '\n';
+
+    cout << "\nTransition table:\n";
+    cout << "State\t";
+
+    for (char c : dfa.getAlphabet())
+        cout << c << "\t";
+
+    cout << '\n';
+
+    for (int s = 0; s < dfa.getNumStates(); ++s) {
+        cout << s << "\t";
+        for (int a = 0; a < dfa.getAlphabet().size(); ++a)
+            cout << dfa.getTransition(s, a) << "\t";
+        cout << '\n';
+    }
+}
+
+void runTest(int testNumber, const DFA& dfa, int expectedStates) {
+    cout << "\n========== TEST " << testNumber << " ==========\n";
+
+    if (!DFAvalidator::isValid(dfa)) {
+        cout << "Invalid DFA!\n";
+        return;
+    }
+
+    cout << "Original DFA:\n";
+    printDFA(dfa);
+
+    DFA minimized = minimizeDFA(dfa);
+
+    cout << "\nMinimized DFA:\n";
+    printDFA(minimized);
+
+    cout << "\nExpected states: " << expectedStates << '\n';
+    cout << "Actual states: " << minimized.getNumStates() << '\n';
+
+    if (minimized.getNumStates() == expectedStates)
+        cout << "PASS\n";
+    else
+        cout << "FAIL\n";
+}
 
 int main() {
 
-    // Test 1: Valid DFA
-    cout << "Test 1: Valid DFA\n";
+    // Test 1: All states equivalent
+    runTest(1,
+        DFA(3, {'a', 'b'}, 0,
+            {
+                {0, 0},
+                {1, 1},
+                {2, 2}
+            },
+            {}),
+        1
+    );
 
-    vector<char> alphabet = {'a', 'b'};
+    // Test 2: All states distinguishable
+    runTest(2,
+        DFA(3, {'a', 'b'}, 0,
+            {
+                {1, 0},
+                {2, 1},
+                {2, 2}
+            },
+            {2}),
+        3
+    );
 
-    vector<vector<int>> transitions = {
-        {1, 2},
-        {0, 2},
-        {2, 1}
-    };
+    // Test 3: Two equivalent non-final states
+    runTest(3,
+        DFA(3, {'a', 'b'}, 0,
+            {
+                {1, 2},
+                {1, 2},
+                {2, 2}
+            },
+            {2}),
+        2
+    );
 
-    vector<int> finals = {1};
+    // Test 4: Two equivalent final states
+    runTest(4,
+        DFA(3, {'a', 'b'}, 0,
+            {
+                {1, 2},
+                {1, 1},
+                {1, 1}
+            },
+            {1, 2}),
+        2
+    );
 
-    DFA dfa1(3, alphabet, 0, transitions, finals);
+    // Test 5: Multiple refinement iterations
+    runTest(5,
+        DFA(4, {'a', 'b'}, 0,
+            {
+                {1, 0},
+                {2, 1},
+                {3, 2},
+                {3, 3}
+            },
+            {3}),
+        4
+    );
 
-    cout << (DFAvalidator::isValid(dfa1)
-             ? "Valid DFA"
-             : "Invalid DFA") << "\n\n";
-
-
-    // Test 2: Invalid number of states
-    cout << "Test 2: Invalid number of states\n";
-
-    DFA dfa2(0, alphabet, 0, transitions, finals);
-
-    cout << (DFAvalidator::isValid(dfa2)
-             ? "Valid DFA"
-             : "Invalid DFA") << "\n\n";
-
-
-    // Test 3: Invalid start state
-    cout << "Test 3: Invalid start state\n";
-
-    DFA dfa3(3, alphabet, 5, transitions, finals);
-
-    cout << (DFAvalidator::isValid(dfa3)
-             ? "Valid DFA"
-             : "Invalid DFA") << "\n\n";
-
-
-    // Test 4: Invalid final state
-    cout << "Test 4: Invalid final state\n";
-
-    vector<int> invalidFinals = {1, 5};
-
-    DFA dfa4(3, alphabet, 0, transitions, invalidFinals);
-
-    cout << (DFAvalidator::isValid(dfa4)
-             ? "Valid DFA"
-             : "Invalid DFA") << "\n\n";
-
-
-    // Test 5: Invalid transition destination
-    cout << "Test 5: Invalid transition\n";
-
-    vector<vector<int>> invalidTransitions = {
-        {1, 2},
-        {0, 5},
-        {2, 1}
-    };
-
-    DFA dfa5(3, alphabet, 0, invalidTransitions, finals);
-
-    cout << (DFAvalidator::isValid(dfa5)
-             ? "Valid DFA"
-             : "Invalid DFA") << "\n\n";
-
-
-    // Test 6: Incorrect transition table dimensions
-    cout << "Test 6: Incorrect transition table dimensions\n";
-
-    vector<vector<int>> wrongDimensions = {
-        {1, 2},
-        {0},
-        {2, 1}
-    };
-
-    DFA dfa6(3, alphabet, 0, wrongDimensions, finals);
-
-    cout << (DFAvalidator::isValid(dfa6)
-             ? "Valid DFA"
-             : "Invalid DFA") << "\n\n";
-
-
-    // Test 7: Empty alphabet
-    cout << "Test 7: Empty alphabet\n";
-
-    vector<char> emptyAlphabet;
-
-    vector<vector<int>> emptyTransitions = {
-        {},
-        {},
-        {}
-    };
-
-    DFA dfa7(3, emptyAlphabet, 0, emptyTransitions, finals);
-
-    cout << (DFAvalidator::isValid(dfa7)
-             ? "Valid DFA"
-             : "Invalid DFA") << "\n\n";
-
+    // Test 6: Unreachable state
+    runTest(6,
+        DFA(3, {'a'}, 0,
+            {
+                {1},
+                {1},
+                {2}
+            },
+            {1}),
+        3
+    );
 
     return 0;
 }
