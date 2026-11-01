@@ -298,6 +298,102 @@ int main() {
             {1}),
         3
     );
+     // Test 7: One non-final state
+    runTest(7,
+        DFA(1, {'a', 'b'}, 0,
+            {
+                {0, 0}
+            },
+            {}),
+        1
+    );
+
+    // Test 8: One final state
+    runTest(8,
+        DFA(1, {'a', 'b'}, 0,
+            {
+                {0, 0}
+            },
+            {0}),
+        1
+    );
+
+    // Test 9: No final states
+    runTest(9,
+        DFA(4, {'a', 'b'}, 0,
+            {
+                {1, 2},
+                {2, 3},
+                {3, 0},
+                {0, 1}
+            },
+            {}),
+        1
+    );
+
+    // Test 10: All states are final
+    runTest(10,
+        DFA(4, {'a', 'b'}, 0,
+            {
+                {1, 2},
+                {2, 3},
+                {3, 0},
+                {0, 1}
+            },
+            {0, 1, 2, 3}),
+        1
+    );
+
+    // Test 11: Unreachable final states
+    runTest(11,
+        DFA(4, {'a', 'b'}, 0,
+            {
+                {1, 0},
+                {1, 1},
+                {2, 2},
+                {3, 3}
+            },
+            {2, 3}),
+        2
+    );
+
+    // Test 12: Start state is final
+    runTest(12,
+        DFA(3, {'a', 'b'}, 0,
+            {
+                {1, 2},
+                {1, 1},
+                {2, 2}
+            },
+            {0, 1}),
+        3
+    );
+
+    // Test 13: Multiple equivalent groups
+    runTest(13,
+        DFA(6, {'a', 'b'}, 0,
+            {
+                {2, 4},
+                {2, 4},
+                {2, 4},
+                {3, 5},
+                {3, 5},
+                {3, 5}
+            },
+            {3, 4, 5}),
+        2
+    );
+    // Test 14: Four alphabet symbols
+    runTest(14,
+        DFA(3, {'a', 'b', 'c', 'd'}, 0,
+            {
+                {1, 2, 1, 2},
+                {1, 2, 1, 2},
+                {2, 2, 2, 2}
+            },
+            {2}),
+        2
+    );
 
     return 0;
 }
