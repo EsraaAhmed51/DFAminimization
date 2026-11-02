@@ -1,14 +1,9 @@
 #include <iostream>
 #include <vector>
-#include <queue>
 #include <algorithm>
 #include <string>
-
+#include <queue>
 using namespace std;
-
-// =============================================
-// DFA CLASS
-// =============================================
 
 class DFA {
 private:
@@ -16,36 +11,36 @@ private:
     int startState;
     vector<char> alphabet;
     vector<vector<int>> transitionTable;
-    vector<int> finalStates;
+    vector<int> FinalStates;
 
 public:
     DFA() : numStates(0), startState(0) {}
 
-    DFA(int n,
-        vector<char> alphabet,
-        int startState,
-        vector<vector<int>> transitionTable,
-        vector<int> finalStates)
-        : numStates(n),
-          startState(startState),
-          alphabet(alphabet),
-          transitionTable(transitionTable),
-          finalStates(finalStates) {}
+    DFA(int n, vector<char> alphabet, int startState,
+        vector<vector<int>> transitionTable, vector<int> FinalStates)
+        : numStates(n), startState(startState),
+          alphabet(alphabet), transitionTable(transitionTable),
+          FinalStates(FinalStates) {}
 
     int getNumStates() const {
         return numStates;
-    }
-
-    int getStartState() const {
-        return startState;
     }
 
     vector<char> getAlphabet() const {
         return alphabet;
     }
 
+    int getStartState() const {
+        return startState;
+    }
+
     vector<int> getFinalStates() const {
-        return finalStates;
+        return FinalStates;
+    }
+
+    bool isFinal(int state) const {
+        return find(FinalStates.begin(), FinalStates.end(), state)
+               != FinalStates.end();
     }
 
     int getTransition(int state, int symbolIndex) const {
@@ -54,12 +49,6 @@ public:
 
     vector<vector<int>> getTransitionTable() const {
         return transitionTable;
-    }
-
-    bool isFinal(int state) const {
-        return find(finalStates.begin(),
-                    finalStates.end(),
-                    state) != finalStates.end();
     }
 
     void setNumStates(int n) {
@@ -74,53 +63,50 @@ public:
         alphabet = a;
     }
 
+    void setTransition(int state, int symbolIndex, int nextState) {
+        transitionTable[state][symbolIndex] = nextState;
+    }
+
     void setTransitionTable(const vector<vector<int>>& t) {
         transitionTable = t;
     }
 
     void setFinalStatesList(const vector<int>& f) {
-        finalStates = f;
+        FinalStates = f;
     }
 };
 
-// =============================================
-// DFA VALIDATOR
-// =============================================
-
-class DFAValidator {
+class DFAvalidator {
 public:
     static bool isValid(const DFA& dfa) {
-
-        int n = dfa.getNumStates();
-        int start = dfa.getStartState();
-
+        int numStates = dfa.getNumStates();
         vector<char> alphabet = dfa.getAlphabet();
-        vector<vector<int>> table = dfa.getTransitionTable();
+        int startState = dfa.getStartState();
+        vector<vector<int>> transitionTable = dfa.getTransitionTable();
 
-        if (n <= 0)
+        if (numStates <= 0)
             return false;
 
         if (alphabet.empty())
             return false;
 
-        if (start < 0 || start >= n)
+        if (startState < 0 || startState >= numStates)
             return false;
 
-        if (table.size() != n)
-            return false;
-
-        for (int f : dfa.getFinalStates()) {
-            if (f < 0 || f >= n)
+        for (int finalState : dfa.getFinalStates()) {
+            if (finalState < 0 || finalState >= numStates)
                 return false;
         }
 
-        for (const auto& row : table) {
+        if (transitionTable.size() != static_cast<size_t>(numStates))
+            return false;
 
+        for (const auto& row : transitionTable) {
             if (row.size() != alphabet.size())
                 return false;
 
-            for (int next : row) {
-                if (next < 0 || next >= n)
+            for (int state : row) {
+                if (state < -1 || state >= numStates)
                     return false;
             }
         }
@@ -129,354 +115,263 @@ public:
     }
 };
 
-// =============================================
-// MINIMIZATION RESULT STRUCT
-// =============================================
-
 struct MinimizedResult {
     DFA dfa;
     vector<vector<int>> groups;
-
-    MinimizedResult(DFA d, vector<vector<int>> g)
-        : dfa(d), groups(g) {}
 };
 
-// =============================================
-// OPTIMIZED TABLE-FILLING ALGORITHM
-// =============================================
+class DisjointSet {
+private:
+    vector<int> parent;
+    vector<int> rankValue;
+
+public:
+    explicit DisjointSet(int n) : parent(n), rankValue(n, 0) {
+        for (int i = 0; i < n; ++i)
+            parent[i] = i;
+    }
+
+    int find(int x) {
+        if (parent[x] != x)
+            parent[x] = find(parent[x]);
+        return parent[x];
+    }
+
+    void unite(int a, int b) {
+        a = find(a);
+        b = find(b);
+
+        if (a == b)
+            return;
+
+        if (rankValue[a] < rankValue[b])
+            swap(a, b);
+
+        parent[b] = a;
+
+        if (rankValue[a] == rankValue[b])
+            ++rankValue[a];
+    }
+};
 
 MinimizedResult minimizeDFA(const DFA& d) {
+    const int S = d.getNumStates();
+    const int A = static_cast<int>(d.getAlphabet().size());
 
-    int n = d.getNumStates();
-    int A = d.getAlphabet().size();
+    // Add one internal Error state. It is not included in the final DFA.
+    const int errorState = S;
+    const int totalStates = S + 1;
 
-    // -----------------------------------------
-    // STEP 1: Find reachable states
-    // -----------------------------------------
+    // Build a complete transition table for the table-filling algorithm.
+    // Every missing transition (-1) goes to the internal Error state.
+    vector<vector<int>> transitions(totalStates, vector<int>(A, errorState));
 
-    vector<bool> reachable(n, false);
-    vector<int> reachableStates;
-
-    queue<int> q;
-
-    int start = d.getStartState();
-
-    q.push(start);
-    reachable[start] = true;
-
-    while (!q.empty()) {
-
-        int u = q.front();
-        q.pop();
-
-        reachableStates.push_back(u);
-
-        for (int a = 0; a < A; a++) {
-
-            int v = d.getTransition(u, a);
-
-            if (!reachable[v]) {
-                reachable[v] = true;
-                q.push(v);
-            }
+    for (int s = 0; s < S; ++s) {
+        for (int a = 0; a < A; ++a) {
+            int nextState = d.getTransition(s, a);
+            transitions[s][a] = (nextState == -1) ? errorState : nextState;
         }
     }
 
-    int R = reachableStates.size();
+    // The Error state loops to itself for every input symbol.
+    for (int a = 0; a < A; ++a)
+        transitions[errorState][a] = errorState;
 
-    // Original state -> reachable-state index
-    vector<int> id(n, -1);
+    // The Error state is non-final.
+    vector<bool> isFinal(totalStates, false);
+    for (int s = 0; s < S; ++s)
+        isFinal[s] = d.isFinal(s);
 
-    for (int i = 0; i < R; i++)
-        id[reachableStates[i]] = i;
+    // Give every unordered pair (i, j), i < j, a unique index.
+    vector<vector<int>> pairIndex(totalStates, vector<int>(totalStates, -1));
+    int pairCount = 0;
 
-    // -----------------------------------------
-    // STEP 2: Build reachable DFA
-    // -----------------------------------------
-
-    vector<vector<int>> trans(R, vector<int>(A));
-    vector<bool> isFinal(R, false);
-
-    for (int i = 0; i < R; i++) {
-
-        int originalState = reachableStates[i];
-
-        isFinal[i] = d.isFinal(originalState);
-
-        for (int a = 0; a < A; a++) {
-
-            int originalNext =
-                d.getTransition(originalState, a);
-
-            trans[i][a] = id[originalNext];
+    for (int i = 0; i < totalStates; ++i) {
+        for (int j = i + 1; j < totalStates; ++j) {
+            pairIndex[i][j] = pairCount;
+            pairIndex[j][i] = pairCount;
+            ++pairCount;
         }
     }
 
-    // -----------------------------------------
-    // STEP 3: Initialize table
-    // -----------------------------------------
+    // reverseDependencies[targetPair] contains source pairs whose
+    // transitions lead to targetPair for at least one input symbol.
+    vector<vector<int>> reverseDependencies(pairCount);
 
-    // marked[i][j] = true means distinguishable
-    vector<vector<bool>> marked(
-        R, vector<bool>(R, false)
-    );
+    for (int p = 0; p < totalStates; ++p) {
+        for (int q = p + 1; q < totalStates; ++q) {
+            int sourcePair = pairIndex[p][q];
 
-    // dependencies[x][y] contains pairs whose
-    // distinguishability depends on pair (x,y)
-    vector<vector<vector<pair<int, int>>>> dependencies(
-        R, vector<vector<pair<int, int>>>(R)
-    );
+            for (int a = 0; a < A; ++a) {
+                int r = transitions[p][a];
+                int t = transitions[q][a];
 
-    queue<pair<int, int>> worklist;
-
-    // Mark final vs non-final pairs
-    for (int i = 0; i < R; i++) {
-
-        for (int j = i + 1; j < R; j++) {
-
-            if (isFinal[i] != isFinal[j]) {
-
-                marked[i][j] = true;
-                worklist.push({i, j});
-            }
-        }
-    }
-
-    // -----------------------------------------
-    // STEP 4: Build dependency graph
-    // -----------------------------------------
-
-    for (int i = 0; i < R; i++) {
-
-        for (int j = i + 1; j < R; j++) {
-
-            for (int a = 0; a < A; a++) {
-
-                int x = trans[i][a];
-                int y = trans[j][a];
-
-                // Same destination means no dependency
-                if (x == y)
+                if (r == t)
                     continue;
 
-                // Ensure x < y
-                if (x > y)
-                    swap(x, y);
-
-                dependencies[x][y].push_back({i, j});
+                int targetPair = pairIndex[r][t];
+                reverseDependencies[targetPair].push_back(sourcePair);
             }
         }
     }
 
-    // -----------------------------------------
-    // STEP 5: Propagate distinguishability
-    // -----------------------------------------
+    // Initially, every pair containing one final and one non-final state
+    // is distinguishable.
+    vector<bool> distinguishable(pairCount, false);
+    queue<int> workQueue;
 
-    while (!worklist.empty()) {
-
-        pair<int, int> current = worklist.front();
-        worklist.pop();
-
-        int x = current.first;
-        int y = current.second;
-
-        for (auto dependent : dependencies[x][y]) {
-
-            int i = dependent.first;
-            int j = dependent.second;
-
-            if (!marked[i][j]) {
-
-                marked[i][j] = true;
-
-                worklist.push({i, j});
+    for (int i = 0; i < totalStates; ++i) {
+        for (int j = i + 1; j < totalStates; ++j) {
+            if (isFinal[i] != isFinal[j]) {
+                int id = pairIndex[i][j];
+                distinguishable[id] = true;
+                workQueue.push(id);
             }
         }
     }
 
-    // -----------------------------------------
-    // STEP 6: Create equivalence classes
-    // -----------------------------------------
+    // Propagate distinguishability through reverse dependencies.
+    while (!workQueue.empty()) {
+        int markedPair = workQueue.front();
+        workQueue.pop();
 
-    vector<int> group(R, -1);
-
-    int numGroups = 0;
-
-    for (int i = 0; i < R; i++) {
-
-        if (group[i] != -1)
-            continue;
-
-        group[i] = numGroups;
-
-        for (int j = i + 1; j < R; j++) {
-
-            if (!marked[i][j])
-                group[j] = numGroups;
-        }
-
-        numGroups++;
-    }
-
-    // -----------------------------------------
-    // STEP 7: Construct minimized DFA
-    // -----------------------------------------
-
-    vector<vector<int>> newTransitionTable(
-        numGroups, vector<int>(A, 0)
-    );
-
-    vector<bool> newFinal(numGroups, false);
-
-    for (int s = 0; s < R; s++) {
-
-        int g = group[s];
-
-        if (isFinal[s])
-            newFinal[g] = true;
-
-        for (int a = 0; a < A; a++) {
-
-            int next = trans[s][a];
-
-            newTransitionTable[g][a] = group[next];
+        for (int dependentPair : reverseDependencies[markedPair]) {
+            if (!distinguishable[dependentPair]) {
+                distinguishable[dependentPair] = true;
+                workQueue.push(dependentPair);
+            }
         }
     }
 
-    vector<int> newFinalStates;
+    // Any pair of original states not marked distinguishable is equivalent.
+    // Use DSU to collect the equivalent original states into groups.
+    DisjointSet dsu(S);
 
-    for (int g = 0; g < numGroups; g++) {
+    for (int i = 0; i < S; ++i) {
+        for (int j = i + 1; j < S; ++j) {
+            int id = pairIndex[i][j];
 
-        if (newFinal[g])
-            newFinalStates.push_back(g);
+            if (!distinguishable[id])
+                dsu.unite(i, j);
+        }
     }
 
-    DFA result;
+    vector<int> rootToGroup(S, -1);
+    vector<int> groupOfState(S, -1);
+    vector<vector<int>> groups;
 
-    result.setNumStates(numGroups);
-    result.setAlphabet(d.getAlphabet());
+    for (int s = 0; s < S; ++s) {
+        int root = dsu.find(s);
 
-    result.setStartState(
-        group[id[d.getStartState()]]
+        if (rootToGroup[root] == -1) {
+            rootToGroup[root] = static_cast<int>(groups.size());
+            groups.push_back({});
+        }
+
+        int groupId = rootToGroup[root];
+        groupOfState[s] = groupId;
+        groups[groupId].push_back(s);
+    }
+
+    // Construct the minimized DFA using one representative from each group.
+    const int minimizedStates = static_cast<int>(groups.size());
+    DFA minimized;
+
+    minimized.setNumStates(minimizedStates);
+    minimized.setAlphabet(d.getAlphabet());
+    minimized.setStartState(groupOfState[d.getStartState()]);
+    minimized.setTransitionTable(
+        vector<vector<int>>(minimizedStates, vector<int>(A, -1))
     );
 
-    result.setTransitionTable(newTransitionTable);
-    result.setFinalStatesList(newFinalStates);
+    vector<int> finalGroups;
 
-    // Original states -> minimized states
-    vector<int> stateMapping(n, -1);
+    for (int g = 0; g < minimizedStates; ++g) {
+        int representative = groups[g][0];
 
-    for (int s = 0; s < n; s++) {
+        if (d.isFinal(representative))
+            finalGroups.push_back(g);
 
-        if (reachable[s])
-            stateMapping[s] = group[id[s]];
+        for (int a = 0; a < A; ++a) {
+            int nextState = d.getTransition(representative, a);
+            int minimizedNext = (nextState == -1)
+                                  ? -1
+                                  : groupOfState[nextState];
+
+            minimized.setTransition(g, a, minimizedNext);
+        }
     }
 
-    // Store original state members of each minimized group
-    vector<vector<int>> groups(numGroups);
+    minimized.setFinalStatesList(finalGroups);
 
-    for (int s = 0; s < R; s++) {
-        groups[group[s]].push_back(reachableStates[s]);
-    }
-
-    return MinimizedResult(result, groups);
+    MinimizedResult result;
+    result.dfa = minimized;
+    result.groups = groups;
+    return result;
 }
 
-// =============================================
-// PRINT DFA
-// =============================================
-
-
 void printGroupName(const vector<int>& members) {
-
     if (members.size() == 1) {
         cout << members[0];
         return;
     }
 
     cout << "{";
-
-    for (int i = 0; i < members.size(); i++) {
+    for (int i = 0; i < static_cast<int>(members.size()); ++i) {
         cout << members[i];
-
-        if (i + 1 < members.size())
+        if (i + 1 < static_cast<int>(members.size()))
             cout << ",";
     }
-
     cout << "}";
 }
 
 string symbolName(char symbol) {
-
     if (symbol == 'L' || symbol == 'l')
         return "letter";
-
     if (symbol == 'D' || symbol == 'd')
         return "digit";
-
     return string(1, symbol);
 }
 
-void printMinimizedDFA(
-    const DFA& dfa,
-    const vector<vector<int>>& groups) {
-
+void printMinimizedDFA(const DFA& dfa, const vector<vector<int>>& groups) {
     cout << "Start: ";
-
     printGroupName(groups[dfa.getStartState()]);
-
     cout << '\n';
 
     cout << "Final: ";
-
     bool firstFinal = true;
 
-    for (int s = 0; s < dfa.getNumStates(); s++) {
-
+    for (int s = 0; s < dfa.getNumStates(); ++s) {
         if (dfa.isFinal(s)) {
-
             if (!firstFinal)
                 cout << ", ";
 
             printGroupName(groups[s]);
-
             firstFinal = false;
         }
     }
 
     cout << '\n';
 
-    for (int s = 0; s < dfa.getNumStates(); s++) {
-
-        for (int a = 0; a < dfa.getAlphabet().size(); a++) {
-
+    for (int s = 0; s < dfa.getNumStates(); ++s) {
+        for (int a = 0; a < static_cast<int>(dfa.getAlphabet().size()); ++a) {
             int nextState = dfa.getTransition(s, a);
 
             if (nextState == -1)
                 continue;
 
             printGroupName(groups[s]);
-
             cout << "   ";
-
             printGroupName(groups[nextState]);
-
-            cout << "   "
-                 << symbolName(dfa.getAlphabet()[a])
-                 << '\n';
+            cout << "   " << symbolName(dfa.getAlphabet()[a]) << '\n';
         }
     }
 }
 
-void runTest(
-    int testNumber,
-    const DFA& dfa,
-    int expectedStates) {
+void runTest(int testNumber, const DFA& dfa, int expectedStates) {
+    cout << "\n========== TEST " << testNumber << " ==========\n";
 
-    cout << "\n========== TEST "
-         << testNumber << " ==========\n";
-
-    if (!DFAValidator::isValid(dfa)) {
+    if (!DFAvalidator::isValid(dfa)) {
         cout << "Invalid DFA!\n";
         return;
     }
@@ -484,17 +379,10 @@ void runTest(
     MinimizedResult minimized = minimizeDFA(dfa);
 
     cout << "\nMinimized DFA:\n";
+    printMinimizedDFA(minimized.dfa, minimized.groups);
 
-    printMinimizedDFA(
-        minimized.dfa,
-        minimized.groups
-    );
-
-    cout << "\nExpected states: "
-         << expectedStates << '\n';
-
-    cout << "Actual states: "
-         << minimized.dfa.getNumStates() << '\n';
+    cout << "\nExpected states: " << expectedStates << '\n';
+    cout << "Actual states: " << minimized.dfa.getNumStates() << '\n';
 
     if (minimized.dfa.getNumStates() == expectedStates)
         cout << "PASS\n";
@@ -502,11 +390,7 @@ void runTest(
         cout << "FAIL\n";
 }
 
-// =============================================
-// MAIN
-// =============================================
 int main() {
-
     runTest(1,
         DFA(4, {'a', 'b'}, 0,
             {
@@ -553,6 +437,20 @@ int main() {
             },
             {0, 1, 2}),
         2
+    );
+
+    runTest(5,
+        DFA(6, {'a', 'b'}, 0,
+            {
+                {1, 2},
+                {4, 1},
+                {4, 3},
+                {4, 3},
+                {4, 5},
+                {5, 5}
+            },
+            {4, 5}),
+        3
     );
 
     return 0;
